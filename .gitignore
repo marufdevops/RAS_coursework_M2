@@ -1,0 +1,7 @@
+*.md
+*.pdf
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+/example_pddl_navigation/*
