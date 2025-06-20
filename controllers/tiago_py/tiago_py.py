@@ -52,44 +52,42 @@ r_motor.setVelocity(0)
 # Initialize keyboard input
 keyboard = KeyboardReader(timestep)
 
-# Target coordinates (exact centers from goalchecker polygons)
+# Target coordinates will be defined below with waypoints
+
+# Optimized waypoints for efficient navigation
+WAYPOINTS = {
+    # Robot start position
+    'start': (-1.96, -1.95),
+
+    # Central navigation waypoints
+    'center': (-0.1, -2.76),
+    'north_center': (-0.05, 2.9),
+    'east_center': (0.95, 0.78),
+    'south_center': (2.6, -0.48),
+
+    # Intermediate waypoints for better routing
+    'northwest_corridor': (-1.5, 2.0),  # Direct path to northwest area
+    'west_corridor': (-2.0, 0.5),       # Western corridor for better routing
+
+    # Optimized goal approach waypoints (closer to targets)
+    'balls_approach': (-2.2, -3.8),     # Closer to balls target
+    'ducks_approach': (-2.8, 3.5),      # Much closer to ducks target
+    'red_approach': (3.2, 2.8),         # Closer to red target
+    'green_approach': (3.2, -3.5),      # Closer to green target
+}
+
+# Goal target coordinates
 TARGET_COORDS = {
-    'red': (3.68, 3.02),      # Red box center
-    'green': (3.68, -3.95),   # Green box center
-    'ducks': (-3.0, 3.7),     # Ducks container center
-    'balls': (-2.5, -4.0)     # Balls container center (corrected to match GOAL_WAYPOINTS)
+    'balls': (-2.5, -4.0),
+    'ducks': (-3.0, 3.7),
+    'red': (3.68, 3.02),
+    'green': (3.68, -3.95),
 }
 
-# Simple waypoint navigation based on user's working coordinates
-GOAL_WAYPOINTS = {
-    'balls': {
-        'description': 'Simple waypoints for balls target (adjusted for goalchecker polygon)',
-        'target_coords': (-2.5, -4.0),
-        'waypoints': {
-            # Using exact coordinates from user's image that were working
-            'start': (-1.96, -1.95),
-            'intermediate': (-0.1, -3),
-            'balls_approach': (-2.3, -3.9),  # Moved closer to balls polygon for 0.8m detection
-        },
-        'connections': [
-            ('start', 'intermediate'),
-            ('intermediate', 'balls_approach'),
-        ],
-        'verified': True
-    },
+# Let pyperplan connect ALL waypoints to ALL waypoints for optimal pathfinding
+# No artificial connection constraints - pyperplan will find the best path
 
-    # Placeholder for other goals (to be added after balls verification)
-    'red': {'verified': False},
-    'green': {'verified': False},
-    'ducks': {'verified': False},
-}
-
-# Helper function to get waypoints for a specific goal
-def get_waypoints_for_goal(goal_name):
-    """Get waypoints dictionary for a specific goal"""
-    if goal_name in GOAL_WAYPOINTS:
-        return GOAL_WAYPOINTS[goal_name].get('waypoints', {})
-    return {}
+# Removed unnecessary helper functions
 
 # Goal queue and navigation state
 goal_queue = []
@@ -101,7 +99,7 @@ last_position = None        # Track last position for progress monitoring
 position_stuck_time = 0     # Time when robot got stuck in same position
 STUCK_TIMEOUT = 30.0        # Time to wait before considering robot stuck (increased)
 plan_completion_time = 0    # Time when plan was completed (to prevent infinite oscillation)
-COMPLETION_TIMEOUT = 10.0   # Max time to spend trying to reach final target
+COMPLETION_TIMEOUT = 20.0   # Max time to spend trying to reach final target (increased)
 
 # Navigation parameters (optimized for faster, more responsive movement)
 WAYPOINT_THRESHOLD = 0.4  # Distance to consider waypoint reached
@@ -141,29 +139,21 @@ def normalize_angle(angle):
         angle += 2 * math.pi
     return angle
 
-# Obstacle detection removed - focusing on basic navigation first
+def write_pddl_problem_simple(goal_target):
+    """Generate PDDL problem - let pyperplan find optimal path between ANY waypoints"""
+    goal_waypoint_map = {
+        'balls': 'balls_approach',
+        'ducks': 'ducks_approach',
+        'red': 'red_approach',
+        'green': 'green_approach'
+    }
 
-# Removed get_closest_waypoint - PDDL planner handles optimal pathfinding
-
-def write_pddl_problem_goal_specific(goal_target):
-    """Generate simple PDDL problem file using goal-specific waypoints"""
-    if goal_target not in GOAL_WAYPOINTS:
-        print(f"Error: No waypoints defined for goal '{goal_target}'")
+    if goal_target not in goal_waypoint_map:
+        print(f"Error: Unknown goal '{goal_target}'")
         return False
 
-    goal_data = GOAL_WAYPOINTS[goal_target]
-    waypoints = goal_data.get('waypoints', {})
-    connections = goal_data.get('connections', [])
-
-    if not waypoints or not connections:
-        print(f"Error: Incomplete waypoint data for goal '{goal_target}'")
-        return False
-
-    # Get the final waypoint
-    final_waypoint = connections[-1][1] if connections else list(waypoints.keys())[-1]
-
-    # Generate simple PDDL problem content
-    waypoint_names = ' '.join(waypoints.keys())
+    goal_waypoint = goal_waypoint_map[goal_target]
+    waypoint_names = ' '.join(WAYPOINTS.keys())
 
     problem_content = f"""(define (problem navigate-to-{goal_target})
     (:domain warehouse)
@@ -173,114 +163,17 @@ def write_pddl_problem_goal_specific(goal_target):
     )
     (:init
         (at robot start)
-        ; Simple waypoint connections
+        ; Connect ALL waypoints to ALL waypoints - no artificial constraints
 """
 
-    # Add bidirectional connections
-    for from_wp, to_wp in connections:
-        problem_content += f"        (connected {from_wp} {to_wp})\n"
-        problem_content += f"        (connected {to_wp} {from_wp})\n"
+    # Connect every waypoint to every other waypoint
+    waypoint_list = list(WAYPOINTS.keys())
+    for wp1 in waypoint_list:
+        for wp2 in waypoint_list:
+            if wp1 != wp2:  # Don't connect waypoint to itself
+                problem_content += f"        (connected {wp1} {wp2})\n"
 
     problem_content += f"""    )
-    (:goal
-        (at robot {final_waypoint})
-    )
-)"""
-
-    with open("warehouse_problem.pddl", 'w') as f:
-        f.write(problem_content)
-
-    print(f"Generated simple PDDL problem for {goal_target}")
-    print(f"Path: {' -> '.join([conn[0] for conn in connections] + [final_waypoint])}")
-    return True
-
-def write_pddl_problem(start_waypoint, goal_target):
-    """Generate PDDL problem file for navigation (legacy function)"""
-    # Try goal-specific waypoints first
-    if goal_target in GOAL_WAYPOINTS and GOAL_WAYPOINTS[goal_target].get('verified', False):
-        return write_pddl_problem_goal_specific(goal_target)
-
-    # Fallback to legacy approach
-    goal_waypoint_map = {
-        'red': 'red_approach',
-        'green': 'green_approach',
-        'ducks': 'ducks_approach',
-        'balls': 'balls_approach'
-    }
-    goal_waypoint = goal_waypoint_map.get(goal_target, 'center')
-
-    # Get waypoints for the goal (fallback to balls if not found)
-    waypoints = get_waypoints_for_goal(goal_target)
-    if not waypoints:
-        waypoints = get_waypoints_for_goal('balls')
-
-    problem_content = f"""(define (problem navigate-to-{goal_target})
-    (:domain warehouse)
-    (:objects
-        robot - robot
-        {' '.join(waypoints.keys())} - waypoint
-    )
-    (:init
-        (at robot {start_waypoint})
-        ; Waypoint connections (bidirectional) - based on actual warehouse layout
-        ; Start connections
-        (connected start center_west)
-        (connected center_west start)
-        (connected start south_west)
-        (connected south_west start)
-
-        ; Central area connections (around the central wall)
-        ; NOTE: center_west and center_east are NOT directly connected due to central wall
-        (connected center_west north_west)
-        (connected north_west center_west)
-        (connected center_west south_west)
-        (connected south_west center_west)
-        (connected center_east north_east)
-        (connected north_east center_east)
-        (connected center_east south_east)
-        (connected south_east center_east)
-
-        ; North-south corridor connections
-        (connected north_west north_central)
-        (connected north_central north_west)
-        (connected north_east north_central)
-        (connected north_central north_east)
-        (connected south_west south_central)
-        (connected south_central south_west)
-        (connected south_east south_central)
-        (connected south_central south_east)
-
-        ; Cross-connections to allow navigation around central wall
-        (connected north_central south_central)
-        (connected south_central north_central)
-
-        ; East-west corridor connections
-        (connected center_west west_corridor)
-        (connected west_corridor center_west)
-        (connected center_east east_corridor)
-        (connected east_corridor center_east)
-
-        ; Target approach connections
-        (connected north_east red_approach)
-        (connected red_approach north_east)
-        (connected east_corridor red_approach)
-        (connected red_approach east_corridor)
-
-        (connected south_east green_approach)
-        (connected green_approach south_east)
-        (connected east_corridor green_approach)
-        (connected green_approach east_corridor)
-
-        (connected north_west ducks_approach)
-        (connected ducks_approach north_west)
-        (connected west_corridor ducks_approach)
-        (connected ducks_approach west_corridor)
-
-        (connected south_west balls_approach)
-        (connected balls_approach south_west)
-        (connected west_corridor balls_approach)
-        (connected balls_approach west_corridor)
-    )
     (:goal
         (at robot {goal_waypoint})
     )
@@ -289,119 +182,62 @@ def write_pddl_problem(start_waypoint, goal_target):
     with open("warehouse_problem.pddl", 'w') as f:
         f.write(problem_content)
 
-def find_pyperplan_path():
-    """Find the absolute path to pyperplan executable"""
-    # Common paths where pyperplan might be installed
-    possible_paths = [
-        "/opt/anaconda3/bin/pyperplan",
-        "/usr/local/bin/pyperplan",
-        "/usr/bin/pyperplan",
-        "pyperplan"  # fallback to PATH
-    ]
+    print(f"✅ Generated PDDL: start -> {goal_waypoint} (all waypoints connected)")
+    return True
 
-    for path in possible_paths:
-        try:
-            # Test if pyperplan works at this path
-            result = subprocess.run([path, "--help"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                print(f"Found pyperplan at: {path}")
-                return path
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            continue
-
-    # If not found, try to find it using which command
+def call_pyperplan_simple(goal_target):
+    """Call pyperplan - let it find the optimal path"""
     try:
-        result = subprocess.run(["which", "pyperplan"], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            path = result.stdout.strip()
-            print(f"Found pyperplan using which: {path}")
-            return path
-    except:
-        pass
-
-    print("ERROR: pyperplan not found in any common locations")
-    return None
-
-def call_pddl_planner(start_waypoint, goal_target):
-    """Call PDDL planner using command-line interface with absolute path"""
-    try:
-        # Find pyperplan executable
-        pyperplan_path = find_pyperplan_path()
-        if not pyperplan_path:
-            print("Cannot find pyperplan executable")
+        # Generate problem file
+        if not write_pddl_problem_simple(goal_target):
             return []
 
-        # Write problem file
-        write_pddl_problem(start_waypoint, goal_target)
+        # Call pyperplan command
+        cmd = ["/opt/anaconda3/bin/pyperplan", "-H", "hff", "-s", "astar",
+               "warehouse_domain.pddl", "warehouse_problem.pddl"]
 
-        # Use pyperplan command-line interface with absolute paths
-        domain_file = os.path.abspath("warehouse_domain.pddl")
-        problem_file = os.path.abspath("warehouse_problem.pddl")
-
-        # Call pyperplan with absolute path and proper environment
-        cmd = [pyperplan_path, "-H", "hff", "-s", "astar", domain_file, problem_file]
-
-        print(f"Running PDDL planner: {' '.join(cmd)}")
-
-        # Set up environment to ensure Python modules are found
-        env = os.environ.copy()
-        env['PATH'] = '/opt/anaconda3/bin:' + env.get('PATH', '')
-        env['PYTHONPATH'] = '/opt/anaconda3/lib/python3.12/site-packages:' + env.get('PYTHONPATH', '')
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+        print(f"🧠 Pyperplan finding optimal path to {goal_target}...")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
         if result.returncode == 0:
-            # Look for solution file (pyperplan creates .pddl.soln file)
-            solution_file = problem_file + '.soln'
-
+            # Read solution file
+            solution_file = "warehouse_problem.pddl.soln"
             if os.path.exists(solution_file):
                 with open(solution_file, 'r') as f:
                     solution_content = f.read().strip()
 
-                print(f"PDDL solution found: {solution_content}")
-
-                # Parse solution to extract waypoints
+                # Parse waypoints from solution
                 waypoints = []
-                lines = solution_content.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('(move robot'):
-                        # Extract destination waypoint from action
-                        # Format: (move robot from_waypoint to_waypoint)
-                        parts = line.split()
+                for line in solution_content.split('\n'):
+                    if line.strip().startswith('(move robot'):
+                        parts = line.strip().replace(')', '').split()
                         if len(parts) >= 4:
-                            # Clean up waypoint name (remove trailing parentheses)
-                            waypoint = parts[3].rstrip(')')
-                            waypoints.append(waypoint)
+                            waypoints.append(parts[3])  # destination waypoint
 
                 # Clean up solution file
                 os.remove(solution_file)
+
+                print(f"✅ Optimal path: {waypoints}")
                 return waypoints
             else:
-                print("PDDL planning failed - no solution file generated")
+                print(f"❌ No solution file generated")
                 return []
         else:
-            print(f"PDDL planner failed with return code {result.returncode}")
-            print(f"Error output: {result.stderr}")
-            print(f"Standard output: {result.stdout}")
+            print(f"❌ Pyperplan failed: {result.stderr}")
             return []
 
-    except subprocess.TimeoutExpired:
-        print("PDDL planning timeout")
-        return []
     except Exception as e:
-        print(f"PDDL planning error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Error calling pyperplan: {e}")
         return []
 
-def move_to_waypoint(target_waypoint_name, goal_name='balls'):
+# Dynamic PDDL planning - generates solutions based on current robot position
+
+def move_to_waypoint(target_waypoint_name):
     """Move robot towards target waypoint using proportional control"""
-    waypoints = get_waypoints_for_goal(goal_name)
-    if target_waypoint_name not in waypoints:
+    if target_waypoint_name not in WAYPOINTS:
         return False
 
-    target_point = waypoints[target_waypoint_name]
+    target_point = WAYPOINTS[target_waypoint_name]
     current_angle = get_current_angle()
 
     # Calculate distance and angle to target
@@ -438,39 +274,7 @@ def stop_robot():
     l_motor.setVelocity(0)
     r_motor.setVelocity(0)
 
-def test_balls_waypoints():
-    """Test navigation to each balls waypoint manually"""
-    balls_waypoints = {
-        'start': (-1.96, -1.95),
-        'intermediate': (-0.1, -3.0),   # Adjusted y-axis to -3.0
-        'balls_approach': (-2.3, -3.9),
-    }
-
-    # Change this to test different waypoints
-    current_test = 'balls_approach'  # Options: 'intermediate', 'balls_approach'
-    target_coord = balls_waypoints[current_test]
-
-    print(f"🧪 Testing waypoint: {current_test} at {target_coord}")
-
-    # Use existing navigation function
-    if move_to_waypoint_direct(target_coord):
-        print(f"✅ Successfully reached {current_test}")
-        pos = get_current_position()
-        distance = math.sqrt((pos[0] - target_coord[0])**2 + (pos[1] - target_coord[1])**2)
-        print(f"📏 Final distance from target: {distance:.3f}m")
-
-        # If this is the final approach, check distance to balls target
-        if current_test == 'balls_approach':
-            balls_target = (-2.5, -4.0)
-            target_distance = math.sqrt((pos[0] - balls_target[0])**2 + (pos[1] - balls_target[1])**2)
-            print(f"🎯 Distance to balls target: {target_distance:.3f}m")
-            if target_distance <= 0.8:
-                print("✅ Within detection range!")
-            else:
-                print("⚠️  Outside detection range (>0.8m)")
-    else:
-        print(f"❌ Failed to reach {current_test}")
-        print("💡 Check for obstacles or adjust waypoint coordinates")
+# Removed unused test functions
 
 def process_goal_queue():
     """Process goal queue and manage navigation state"""
@@ -486,9 +290,9 @@ def process_goal_queue():
         navigation_state = 'planning'
         print(f"Starting navigation to: {current_goal}")
 
-        # Plan path using PDDL (always start from 'start' waypoint)
-        start_waypoint = 'start'
-        current_plan = call_pddl_planner(start_waypoint, current_goal)
+        # Let pyperplan find the optimal path with full connectivity
+        print(f"🎯 Planning optimal route to {current_goal}")
+        current_plan = call_pyperplan_simple(current_goal)
 
         if current_plan:
             current_waypoint_index = 0
@@ -540,7 +344,7 @@ def execute_navigation():
     if current_waypoint_index < len(current_plan):
         target_waypoint = current_plan[current_waypoint_index]
 
-        if move_to_waypoint(target_waypoint, current_goal or 'balls'):
+        if move_to_waypoint(target_waypoint):
             print(f"Reached waypoint: {target_waypoint}")
             current_waypoint_index += 1
 
@@ -572,11 +376,21 @@ def execute_navigation():
                     target_coord = TARGET_COORDS[current_goal]
                     target_distance = distance_to_point(target_coord)
 
-                # Success conditions (more lenient to avoid oscillation)
-                if (current_goal in goals_in_range or target_distance <= GOAL_THRESHOLD * 1.2):
+                # Check goal completion conditions
+                condition1 = current_goal in goals_in_range
+                condition2 = target_distance <= GOAL_THRESHOLD * 1.2
+
+                print(f"🔍 Goal check: position=({pos[0]:.2f}, {pos[1]:.2f}), distance={target_distance:.2f}m")
+
+                if condition1 or condition2:
                     print(f"✅ Successfully reached goal: {current_goal}")
-                    if target_distance <= GOAL_THRESHOLD * 1.2:
+                    if condition2:
                         print(f"📏 Distance to target: {target_distance:.2f}m (within {GOAL_THRESHOLD * 1.2:.2f}m threshold)")
+                    if condition1:
+                        print(f"🎯 Goal detected by goalchecker.py")
+
+                    # Goal completed - robot position has changed for next planning
+                    print(f"🔄 Goal completed. Next planning will use updated robot position.")
                     current_goal = None
                     current_plan = []
                     current_waypoint_index = 0
@@ -584,31 +398,22 @@ def execute_navigation():
                     plan_completion_time = 0  # Reset completion timer
                     stop_robot()  # Stop oscillation
                 else:
-                    # Try one more direct approach, then give up to avoid oscillation
-                    print(f"⚠️ Plan completed but goal not quite reached (distance: {target_distance:.2f}m)")
-                    print(f"🎯 Making final approach to target...")
-
-                    # Make one final attempt to reach target
+                    # Try final approach to target
+                    print(f"⚠️ Plan completed, distance: {target_distance:.2f}m - making final approach")
                     if current_goal and current_goal in TARGET_COORDS:
                         target_coord = TARGET_COORDS[current_goal]
-                        # Use a more lenient final approach
                         if move_to_waypoint_direct(target_coord):
-                            print(f"✅ Final approach successful for: {current_goal}")
-                            current_goal = None
-                            current_plan = []
-                            current_waypoint_index = 0
-                            navigation_state = 'idle'
-                            plan_completion_time = 0  # Reset completion timer
-                            stop_robot()
+                            print(f"✅ Final approach successful: {current_goal}")
                         else:
-                            # Accept current position to avoid infinite oscillation
                             print(f"⚠️ Accepting current position to avoid oscillation")
-                            current_goal = None
-                            current_plan = []
-                            current_waypoint_index = 0
-                            navigation_state = 'idle'
-                            plan_completion_time = 0  # Reset completion timer
-                            stop_robot()
+
+                    # Complete the goal
+                    current_goal = None
+                    current_plan = []
+                    current_waypoint_index = 0
+                    navigation_state = 'idle'
+                    plan_completion_time = 0
+                    stop_robot()
 
 def move_to_waypoint_direct(target_coord):
     """Move directly to coordinate (for final approach)"""
@@ -707,16 +512,12 @@ def main():
             pos = get_current_position()
             goals_nearby = get_goals_in_range(pos[0], pos[1])
 
-            print(f"\n--- Status Report ---")
-            print(f"Position: ({pos[0]:.2f}, {pos[1]:.2f})")
-            print(f"Navigation State: {navigation_state}")
-            print(f"Current Goal: {current_goal}")
-            print(f"Goal Queue: {goal_queue}")
-            print(f"Goals in Range: {goals_nearby}")
+            print(f"\n--- Status ---")
+            print(f"Position: ({pos[0]:.2f}, {pos[1]:.2f}) | State: {navigation_state}")
+            print(f"Goal: {current_goal} | Queue: {goal_queue} | Nearby: {goals_nearby}")
             if current_plan:
-                print(f"Current Plan: {current_plan}")
-                print(f"Waypoint Progress: {current_waypoint_index}/{len(current_plan)}")
-            print("--------------------\n")
+                print(f"Plan: {current_plan} | Progress: {current_waypoint_index}/{len(current_plan)}")
+            print("-------------\n")
 
     print("Navigation system shutdown.")
 

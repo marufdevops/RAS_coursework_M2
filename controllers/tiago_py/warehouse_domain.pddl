@@ -1,5 +1,5 @@
 (define (domain warehouse)
-    (:requirements :typing)
+    (:requirements :strips)
     (:types
         robot waypoint - object
     )
@@ -14,8 +14,8 @@
             (connected ?from ?to)
         )
         :effect (and
-            (at ?r ?to)
             (not (at ?r ?from))
+            (at ?r ?to)
         )
     )
 )
