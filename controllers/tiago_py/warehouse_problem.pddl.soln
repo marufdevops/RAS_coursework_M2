@@ -1,4 +1,0 @@
-(move tiago start-pos corridor-center)
-(move tiago corridor-center corridor-north)
-(move tiago corridor-north right-upper)
-(move tiago right-upper red-box)
