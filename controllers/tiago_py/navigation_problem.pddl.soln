@@ -1,3 +1,1 @@
-(move tiago node1 node2)
-(move tiago node2 node5)
-(move tiago node5 node4)
+(move tiago node6 node4)

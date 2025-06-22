@@ -134,13 +134,27 @@ class NavigationController:
     
     def start_navigation_to_target(self, target='balls'):
         """Start navigation to specified target using PDDL planning."""
-        if self.state != "IDLE":
+        if self.state not in ["IDLE", "GOAL_REACHED"]:
             print("Navigation already in progress")
             return False
+
+        # Reset state for new navigation
+        if self.state == "GOAL_REACHED":
+            print(f"Starting new navigation from current position to {target}")
+            self.goal_reached = False
 
         print(f"\n=== Starting Navigation to {target.title()} Target ===")
         self.state = "PLANNING"
         self.current_target_goal = target  # Store which goal we're navigating to
+
+        # Reset navigation state variables
+        self.current_path = []
+        self.current_target_node = None
+        self.path_index = 0
+        self.total_distance_covered = 0.0
+        self.planned_total_cost = 0.0
+        self.node_reached_time = None
+        self.last_completed_node = None
 
         robot_pos = self.get_robot_position()
         print(f"Robot position: {robot_pos}")

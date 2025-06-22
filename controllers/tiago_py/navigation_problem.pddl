@@ -12,7 +12,7 @@
   )
 
   (:init
-    (at tiago node1)
+    (at tiago node6)
     (connected node1 node2)
     (connected node2 node1)
     (connected node2 node3)

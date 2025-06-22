@@ -51,7 +51,7 @@ while robot.step(timestep) != -1:
         # Parse command - accept "balls" or "green"
         command_lower = command.strip().lower()
         if command_lower in ['balls', 'green']:
-            if nav_controller.state == "IDLE":
+            if nav_controller.state in ["IDLE", "GOAL_REACHED"]:
                 success = nav_controller.start_navigation_to_target(command_lower)
                 if not success:
                     print(f"Failed to start navigation to {command_lower} target")
