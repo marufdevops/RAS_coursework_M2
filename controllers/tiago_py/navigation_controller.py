@@ -67,7 +67,6 @@ class NavigationController:
         self.node_reached_time = None
         self.pause_duration = 0.5  # Pause for 0.5 seconds when reaching a node
         self.last_completed_node = None  # Track which node we last completed to prevent duplicate processing
-        self.last_completed_node = None  # Track which node we last completed
         
     def get_robot_position(self):
         """Get current robot position from GPS."""
@@ -78,16 +77,6 @@ class NavigationController:
         compass_values = self.compass.getValues()
         # Use correct compass axis mapping: atan2(x, -z)
         heading = math.atan2(compass_values[0], -compass_values[2])
-        # Debug output to verify compass readings
-        if hasattr(self, '_debug_counter'):
-            self._debug_counter += 1
-        else:
-            self._debug_counter = 0
-
-        if self._debug_counter % 20 == 0:  # Print every 20 calls to avoid spam
-            print(f"DEBUG: Compass values: [{compass_values[0]:.3f}, {compass_values[1]:.3f}, {compass_values[2]:.3f}]")
-            print(f"DEBUG: Calculated heading: {heading:.3f} rad ({heading*180/3.14159:.1f}°)")
-
         return heading
 
     def check_obstacle_detection(self):
@@ -120,10 +109,6 @@ class NavigationController:
                 return False  # Resume navigation
             else:
                 # Still pausing
-                remaining_time = self.obstacle_pause_duration - elapsed_time
-                if int(remaining_time) != getattr(self, '_last_remaining', -1):
-                    print(f"⏳ Obstacle pause: {remaining_time:.1f}s remaining...")
-                    self._last_remaining = int(remaining_time)
                 return True  # Continue pausing
 
         return False  # No obstacle, continue normal navigation
@@ -223,9 +208,7 @@ class NavigationController:
             self.state = "IDLE"
             return False
 
-    def start_navigation_to_balls(self):
-        """Start navigation to balls target (backward compatibility)."""
-        return self.start_navigation_to_target('balls')
+
     
     def navigate_to_current_node(self):
         """Navigate to the current target node using state machine approach."""
@@ -358,16 +341,9 @@ class NavigationController:
     
     def update(self):
         """Main update loop for navigation controller."""
-        if self.state == "IDLE":
-            # Waiting for navigation command
-            pass
-        elif self.state == "PLANNING":
-            # Planning is handled in start_navigation_to_balls
-            pass
-        elif self.state == "NAVIGATING":
+        if self.state == "NAVIGATING":
             self.navigate_to_current_node()
         elif self.state == "GOAL_REACHED":
-            # Goal reached, stop
             self.stop_robot()
     
     def get_status(self):

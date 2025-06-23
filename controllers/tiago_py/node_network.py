@@ -276,15 +276,7 @@ class NodeNetwork:
         """Get the weight (distance) of a connection between two nodes."""
         return self.weights.get((node1, node2), float('inf'))
     
-    def get_connected_nodes(self, node):
-        """Get all nodes connected to the given node."""
-        connected = []
-        for node1, node2 in self.connections:
-            if node1 == node:
-                connected.append(node2)
-            elif node2 == node:
-                connected.append(node1)
-        return connected
+
     
     def find_closest_node(self, position):
         """
@@ -376,10 +368,7 @@ class NodeNetwork:
         else:
             return None
     
-    def get_all_connections(self):
-        """Get all connections with their weights."""
-        return [(node1, node2, self.weights[(node1, node2)]) 
-                for node1, node2 in self.connections]
+
     
     def calculate_path_cost(self, path):
         """
@@ -454,38 +443,4 @@ class NodeNetwork:
         dy = target_pos[1] - current_pos[1]
         return math.atan2(dy, dx)
     
-    def print_network_info(self):
-        """Print detailed network information for debugging."""
-        print("Node Network Information:")
-        print("=" * 50)
-        
-        print(f"\nNodes ({len(self.nodes)}):")
-        for node_name, coords in self.nodes.items():
-            print(f"  {node_name}: {coords}")
-        
-        print(f"\nTargets:")
-        print(f"  Balls Target: {self.balls_target}")
-        print(f"  Green Target: {self.green_target}")
-        print(f"  Ducks Target: {self.ducks_target}")
-        print(f"  Red Target: {self.red_target}")
-        print(f"Goal Threshold: {self.goal_threshold}m")
-        
-        print(f"\nConnections ({len(self.connections)}):")
-        for node1, node2 in self.connections:
-            weight = self.weights[(node1, node2)]
-            print(f"  {node1} <-> {node2}: {weight:.3f}m")
-        
-        print(f"\nClosest node to balls target:")
-        closest_node, distance = self.find_closest_node(self.balls_target)
-        print(f"  {closest_node}: {distance:.3f}m")
 
-
-if __name__ == "__main__":
-    # Test the node network
-    network = NodeNetwork()
-    network.print_network_info()
-    
-    # Test path cost calculation
-    test_path = ['node1', 'node2', 'node4']
-    cost = network.calculate_path_cost(test_path)
-    print(f"\nTest path {test_path} cost: {cost:.3f}m")
