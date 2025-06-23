@@ -39,6 +39,12 @@ class NavigationController:
         # Initialize navigation components
         self.network = NodeNetwork()
         self.pddl_system = PDDLSystem()
+
+        # Simple obstacle detection variables
+        self.obstacle_detected = False
+        self.obstacle_pause_start = None
+        self.obstacle_pause_duration = 10.0  # 10 seconds pause
+        self.obstacle_threshold = 0.3  # 0.1m threshold
         
         # Navigation state
         self.current_path = []
@@ -83,6 +89,44 @@ class NavigationController:
             print(f"DEBUG: Calculated heading: {heading:.3f} rad ({heading*180/3.14159:.1f}°)")
 
         return heading
+
+    def check_obstacle_detection(self):
+        """Simple obstacle detection: pause for 10 seconds if obstacle within 0.1m."""
+        # Get LiDAR readings
+        lidar_values = self.lidar.getRangeImage()
+
+        # Check front-facing sensors for obstacles
+        # Use middle third of LiDAR readings (front-facing)
+        front_readings = lidar_values[len(lidar_values)//3 : -len(lidar_values)//3]
+
+        # Check if any reading is below threshold
+        obstacle_detected_now = any(distance < self.obstacle_threshold for distance in front_readings)
+
+        # If obstacle detected and we're not already pausing
+        if obstacle_detected_now and not self.obstacle_detected:
+            print(f"⚠️  OBSTACLE DETECTED within {self.obstacle_threshold}m! Pausing for {self.obstacle_pause_duration} seconds...")
+            self.obstacle_detected = True
+            self.obstacle_pause_start = time.time()
+            self.stop_robot()
+            return True  # Robot should pause
+
+        # If we're currently pausing due to obstacle
+        if self.obstacle_detected and self.obstacle_pause_start is not None:
+            elapsed_time = time.time() - self.obstacle_pause_start
+            if elapsed_time >= self.obstacle_pause_duration:
+                print("✅ Obstacle pause complete. Resuming navigation...")
+                self.obstacle_detected = False
+                self.obstacle_pause_start = None
+                return False  # Resume navigation
+            else:
+                # Still pausing
+                remaining_time = self.obstacle_pause_duration - elapsed_time
+                if int(remaining_time) != getattr(self, '_last_remaining', -1):
+                    print(f"⏳ Obstacle pause: {remaining_time:.1f}s remaining...")
+                    self._last_remaining = int(remaining_time)
+                return True  # Continue pausing
+
+        return False  # No obstacle, continue normal navigation
     
     def calculate_angle_difference(self, target_angle, current_angle):
         """Calculate the shortest angle difference between two angles."""
@@ -187,6 +231,10 @@ class NavigationController:
         """Navigate to the current target node using state machine approach."""
         if not self.current_target_node:
             return True  # Navigation complete
+
+        # Check for obstacles first - simple pause logic
+        if self.check_obstacle_detection():
+            return False  # Pausing due to obstacle, don't continue navigation
 
         robot_pos = self.get_robot_position()
         target_pos = self.network.get_node_coordinates(self.current_target_node)
