@@ -1,4 +1,4 @@
-#
+# Author: Ahmed Maruf, SID: 250046920
 # TiaGo Robot Navigation System with PDDL-based Path Planning
 #
 # This implementation uses a comprehensive PDDL-based navigation system supporting
@@ -20,6 +20,13 @@
 #
 # Usage: Type "balls", "green", "ducks", or "red" in the 3D view and press enter
 # Expected Output: "Goal reached! Total distance covered: X.XX meters"
+# References:
+#    - Introduction to AI Robotics - Murphy, R.R
+#        - Discusses about sate machines architecture and the basics of sensors
+#    - Path and Motion Planning (class lectures, (2024-25 CS4790J) Robotics and Autonomous Systems, 
+#      Aston University)
+#    - 
+#    - I have taken further helps from multiple LLM's
 #
 
 from controller import Robot
@@ -35,12 +42,15 @@ timestep = int(robot.getBasicTimeStep())
 nav_controller = NavigationController(robot, timestep)
 keyboard = KeyboardReader(timestep)
 
-print("TiaGo PDDL Navigation System Initialized")
-print("=" * 50)
+print("TiaGo PDDL Navigation System with Goal Queue Initialized")
+print("=" * 60)
 print("Supported targets: 'balls', 'green', 'ducks', 'red'")
-print("Type 'balls', 'green', 'ducks', or 'red' in 3D view and press enter to start navigation")
+print("Usage:")
+print("  Single goal: Type 'balls' and press enter")
+print("  Multiple goals: Type 'balls green red' and press enter")
+print("  Add to queue: Type goals anytime (even during navigation)")
 print("Expected output: 'Goal reached! Total distance covered: X.XX meters'")
-print("=" * 50)
+print("=" * 60)
 
 # ============================================================================
 # MAIN CONTROL LOOP - Multi-Goal PDDL Navigation System
@@ -61,35 +71,46 @@ while robot.step(timestep) != -1:
     if command is not None:
         print(f'Got command: {command}')
 
-        # Command validation and parsing with comprehensive goal support
-        # Algorithmic Decision: Case-insensitive matching with whitespace trimming
-        # ensures robust command recognition across different input methods
+        # Parse command for multiple goals
         command_lower = command.strip().lower()
+        goals = command_lower.split()
 
-        # Multi-goal validation: Support for all 4 target types
-        # Design Rationale: Extensible goal set enables future target additions
-        # without architectural changes to the command processing system
-        if command_lower in ['balls', 'green', 'ducks', 'red']:
+        # Filter valid goals
+        valid_goals = [goal for goal in goals if goal in ['balls', 'green', 'ducks', 'red']]
+        invalid_goals = [goal for goal in goals if goal not in ['balls', 'green', 'ducks', 'red']]
 
-            # State-based navigation control with collision prevention
-            # Safety Mechanism: Prevents concurrent navigation attempts that could
-            # cause system instability or conflicting robot behaviors
-            if nav_controller.state in ["IDLE", "GOAL_REACHED"]:
+        if invalid_goals:
+            print(f"❌ Invalid goals ignored: {invalid_goals}")
 
-                # Initiate PDDL-based navigation planning and execution
-                # Integration Point: Bridges user commands with automated planning
-                success = nav_controller.start_navigation_to_target(command_lower)
-                if not success:
-                    # Error handling: Graceful degradation with user feedback
-                    print(f"Failed to start navigation to {command_lower} target")
+        if valid_goals:
+            # Handle single vs multiple goals
+            if len(valid_goals) == 1:
+                single_goal = valid_goals[0]
+
+                # Check if robot is idle or can start new navigation
+                if nav_controller.state in ["IDLE", "GOAL_REACHED"]:
+                    # Start single goal navigation
+                    success = nav_controller.start_navigation_to_target(single_goal)
+                    if not success:
+                        print(f"❌ Failed to start navigation to {single_goal} target")
+                else:
+                    # Add to queue if navigation is in progress
+                    nav_controller.add_goal_to_queue(single_goal)
+                    print(f"🔄 Navigation in progress. Added '{single_goal}' to queue.")
+
             else:
-                # Concurrent operation prevention with state reporting
-                # User Experience: Clear feedback about system state prevents confusion
-                print(f"Navigation already in progress (state: {nav_controller.state})")
+                # Multiple goals - handle queue navigation
+                if nav_controller.state in ["IDLE", "GOAL_REACHED"]:
+                    # Start queue navigation
+                    success = nav_controller.start_queue_navigation(valid_goals)
+                    if not success:
+                        print(f"❌ Failed to start queue navigation")
+                else:
+                    # Add all goals to existing queue
+                    nav_controller.add_multiple_goals_to_queue(valid_goals)
+                    print(f"🔄 Navigation in progress. Added goals to queue.")
         else:
-            # Input validation with comprehensive error messaging
-            # Design Principle: Clear error messages improve system usability
-            print(f"Invalid command: '{command}'. Supported targets: 'balls', 'green', 'ducks', 'red'")
+            print(f"❌ No valid goals found. Supported: 'balls', 'green', 'ducks', 'red'")
 
     # ========================================================================
     # NAVIGATION CONTROL SUBSYSTEM
@@ -128,13 +149,26 @@ while robot.step(timestep) != -1:
     if robot.getTime() % 10 < timestep / 1000.0:
         status = nav_controller.get_status()
 
-        # Conditional reporting: Only display active navigation states
-        # Performance Optimization: Reduces log verbosity during idle periods
+        # Enhanced status reporting with queue information
         if status['state'] != "IDLE":
-            # Comprehensive status display: State, target, and progress metrics
-            # Monitoring Integration: Provides data for performance analysis
-            print(f"Status: {status['state']}, Target: {status['current_target']}, "
-                  f"Distance covered: {status['distance_covered']:.2f}m")
+            # Basic navigation status
+            status_msg = f"Status: {status['state']}"
+
+            if status['current_goal']:
+                status_msg += f", Goal: {status['current_goal']}"
+
+            if status['current_target']:
+                status_msg += f", Target: {status['current_target']}"
+
+            status_msg += f", Distance: {status['distance_covered']:.2f}m"
+
+            # Add queue information if there are queued goals
+            if status['queue'] or status['total_goals'] > 1:
+                status_msg += f", Progress: {status['progress']}"
+                if status['queue']:
+                    status_msg += f", Queue: {status['queue']}"
+
+            print(status_msg)
     
 
 

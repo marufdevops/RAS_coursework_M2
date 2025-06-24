@@ -54,8 +54,14 @@ class NavigationController:
         self.total_distance_covered = 0.0
         self.planned_total_cost = 0.0
 
+        # Goal queue system
+        self.goal_queue = []  # Queue of goals to navigate to
+        self.completed_goals = []  # Track completed goals for progress reporting
+        self.current_goal_index = 0  # Index of current goal in original queue
+        self.total_goals_in_session = 0  # Total goals in current navigation session
+
         # Robot parameters
-        self.max_speed = 3.0
+        self.max_speed = 10.0
         self.angle_tolerance = 0.1  # ~6 degrees tolerance like your working code
         self.position_tolerance = 0.05  # Very tight tolerance - 5cm for precise positioning
 
@@ -78,6 +84,51 @@ class NavigationController:
         # Use correct compass axis mapping: atan2(x, -z)
         heading = math.atan2(compass_values[0], -compass_values[2])
         return heading
+
+    def add_goal_to_queue(self, goal):
+        """Add a goal to the navigation queue."""
+        if goal not in ['balls', 'green', 'ducks', 'red']:
+            return False
+
+        self.goal_queue.append(goal)
+        print(f"📋 Added '{goal}' to queue. Queue: {self.goal_queue}")
+        return True
+
+    def add_multiple_goals_to_queue(self, goals):
+        """Add multiple goals to the navigation queue."""
+        added_goals = []
+        for goal in goals:
+            if self.add_goal_to_queue(goal):
+                added_goals.append(goal)
+
+        if added_goals:
+            print(f"📋 Queue updated: {self.goal_queue}")
+            return True
+        return False
+
+    def get_next_goal_from_queue(self):
+        """Get the next goal from the queue."""
+        if self.goal_queue:
+            return self.goal_queue.pop(0)
+        return None
+
+    def clear_goal_queue(self):
+        """Clear all goals from the queue."""
+        self.goal_queue.clear()
+        self.completed_goals.clear()
+        self.current_goal_index = 0
+        self.total_goals_in_session = 0
+
+    def get_queue_status(self):
+        """Get current queue status information."""
+        return {
+            'queue': self.goal_queue.copy(),
+            'completed': self.completed_goals.copy(),
+            'current_goal': self.current_target_goal,
+            'total_goals': self.total_goals_in_session,
+            'completed_count': len(self.completed_goals),
+            'remaining_count': len(self.goal_queue)
+        }
 
     def check_obstacle_detection(self):
         """Simple obstacle detection: pause for 10 seconds if obstacle within 0.1m."""
@@ -154,7 +205,7 @@ class NavigationController:
     def set_motor_speeds(self, left_speed, right_speed):
         """Set motor speeds with safety limits."""
         # Clamp speeds to safe limits like your working code
-        max_speed = 3.0
+        max_speed = 10.0
         left_speed = max(-max_speed, min(max_speed, left_speed))
         right_speed = max(-max_speed, min(max_speed, right_speed))
 
@@ -171,6 +222,10 @@ class NavigationController:
         if self.state == "GOAL_REACHED":
             print(f"Starting new navigation from current position to {target}")
             self.goal_reached = False
+
+        # If this is a single goal (not part of a queue), set total goals to 1
+        if self.total_goals_in_session == 0:
+            self.total_goals_in_session = 1
 
         print(f"\n=== Starting Navigation to {target.title()} Target ===")
         self.state = "PLANNING"
@@ -208,8 +263,39 @@ class NavigationController:
             self.state = "IDLE"
             return False
 
+    def start_queue_navigation(self, goals):
+        """Start navigation with a queue of goals."""
+        if not goals:
+            print("❌ No goals provided")
+            return False
 
-    
+        # Clear existing queue and add new goals
+        self.clear_goal_queue()
+
+        # Validate and add goals
+        valid_goals = []
+        for goal in goals:
+            if goal in ['balls', 'green', 'ducks', 'red']:
+                valid_goals.append(goal)
+            else:
+                print(f"❌ Invalid goal: '{goal}'. Skipping.")
+
+        if not valid_goals:
+            print("❌ No valid goals provided")
+            return False
+
+        # Set total goals for this session
+        self.total_goals_in_session = len(valid_goals)
+
+        # Add goals to queue (except the first one which we'll start immediately)
+        if len(valid_goals) > 1:
+            self.goal_queue = valid_goals[1:]
+
+        print(f"📋 Queue: {valid_goals} - Starting navigation to {valid_goals[0]}")
+
+        # Start navigation to first goal
+        return self.start_navigation_to_target(valid_goals[0])
+
     def navigate_to_current_node(self):
         """Navigate to the current target node using state machine approach."""
         if not self.current_target_node:
@@ -299,7 +385,7 @@ class NavigationController:
                 speed = max(0.5, distance * 2.0)  # Proportional speed reduction
                 print(f"  Approaching target - reduced speed: {speed:.2f}")
             else:
-                speed = 1.5
+                speed = 10
             self.move_forward(speed=speed)
 
         return False
@@ -312,18 +398,12 @@ class NavigationController:
         # Check using goalchecker module
         nearby_goals = get_goals_in_range(*robot_pos)
         if target_goal in nearby_goals:
-            print(f"\n🎯 {target_goal.upper()} GOAL REACHED! Total distance covered: {self.total_distance_covered:.2f} meters")
-            self.state = "GOAL_REACHED"
-            self.goal_reached = True
-            self.stop_robot()
+            self._handle_goal_reached(target_goal)
             return True
 
         # Also check using network distance calculation
         if self.network.is_goal_reached(robot_pos, target_goal):
-            print(f"\n🎯 {target_goal.upper()} GOAL REACHED! Total distance covered: {self.total_distance_covered:.2f} meters")
-            self.state = "GOAL_REACHED"
-            self.goal_reached = True
-            self.stop_robot()
+            self._handle_goal_reached(target_goal)
             return True
 
         # If we completed the path but didn't reach goal, try to get closer
@@ -338,7 +418,39 @@ class NavigationController:
                 self.move_forward(speed=1.0)  # Slower approach
 
         return False
-    
+
+    def _handle_goal_reached(self, target_goal):
+        """Handle goal completion and queue management."""
+        print(f"\n🎯 {target_goal.upper()} GOAL REACHED! Total distance covered: {self.total_distance_covered:.2f} meters")
+
+        # Add completed goal to completed list
+        self.completed_goals.append(target_goal)
+
+        # Calculate progress
+        queue_status = self.get_queue_status()
+        completed_count = len(self.completed_goals)
+        total_goals = queue_status['total_goals']
+
+        if total_goals > 1:
+            print(f"📊 Goal {completed_count} of {total_goals} completed!")
+
+        self.state = "GOAL_REACHED"
+        self.goal_reached = True
+        self.stop_robot()
+
+        # Check if there are more goals in the queue
+        next_goal = self.get_next_goal_from_queue()
+        if next_goal:
+            print(f"🚀 Starting navigation to next goal: {next_goal}")
+            print(f"📋 Remaining queue: {self.goal_queue}")
+            # Start navigation to next goal from current position
+            self.start_navigation_to_target(next_goal)
+        else:
+            print("🏁 All queued goals completed!")
+            self.current_target_goal = None
+            # Reset session when all goals are completed
+            self.total_goals_in_session = 0
+
     def update(self):
         """Main update loop for navigation controller."""
         if self.state == "NAVIGATING":
@@ -349,12 +461,19 @@ class NavigationController:
     def get_status(self):
         """Get current navigation status."""
         robot_pos = self.get_robot_position()
+        queue_status = self.get_queue_status()
+
         return {
             'state': self.state,
             'position': robot_pos,
             'current_target': self.current_target_node,
+            'current_goal': self.current_target_goal,
             'path': self.current_path,
             'distance_covered': self.total_distance_covered,
             'planned_cost': self.planned_total_cost,
-            'goal_reached': self.goal_reached
+            'goal_reached': self.goal_reached,
+            'queue': queue_status['queue'],
+            'completed_goals': queue_status['completed'],
+            'total_goals': queue_status['total_goals'],
+            'progress': f"{queue_status['completed_count']}/{queue_status['total_goals']}" if queue_status['total_goals'] > 0 else "0/0"
         }
