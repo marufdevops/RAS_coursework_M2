@@ -1,10 +1,3 @@
-"""
-Navigation Controller for TiaGo Robot
-
-This module implements the main navigation logic with PDDL planning,
-robust movement control, and path cost tracking for the balls target.
-"""
-
 import math
 import time
 from node_network import NodeNetwork
@@ -13,66 +6,140 @@ from goalchecker import get_goals_in_range
 
 
 class NavigationController:
+    """
+    **System Architecture:**
+    The controller operates as a hierarchical state machine with the following layers:
+    1. Mission Layer: Manages goal queues and navigation sessions
+    2. Planning Layer: Generates optimal paths using PDDL and A* search
+    3. Execution Layer: Controls robot movement and waypoint navigation
+    4. Safety Layer: Handles obstacle detection and avoidance
+
+    **State Management:**
+    - IDLE: System ready for new navigation commands
+    - PLANNING: Generating optimal path using PDDL system
+    - NAVIGATING: Actively moving toward current waypoint
+    - GOAL_REACHED: Successfully completed current goal
+
+    **Navigation Features:**
+    - Optimal path planning with guaranteed shortest routes
+    - Precise waypoint following with 5cm positioning tolerance
+    - Real-time obstacle detection and avoidance
+    - Multi-goal queue processing with progress tracking
+    - Robust error handling and recovery mechanisms
+
+    Attributes:
+        robot (Robot): Webots robot instance for device access
+        timestep (int): Simulation timestep for device synchronization
+        network (NodeNetwork): Strategic waypoint network for navigation
+        pddl_system (PDDLSystem): PDDL planning system for optimal paths
+        state (str): Current navigation state (IDLE/PLANNING/NAVIGATING/GOAL_REACHED)
+        current_path (list): Current navigation path as sequence of nodes
+        goal_queue (list): Queue of pending goals for sequential navigation
+        total_distance_covered (float): Cumulative distance traveled in current session
+    """
     def __init__(self, robot, timestep):
-        """Initialize the navigation controller."""
+        """
+        Initialize the advanced navigation controller with all required components.
+
+        Sets up robot devices, navigation systems, and control parameters for
+        optimal multi-goal navigation performance. Initializes PDDL planning
+        system and strategic node network for path optimization.
+
+        **Initialization Process:**
+        1. Configure robot devices (motors, sensors, navigation)
+        2. Initialize PDDL planning system and node network
+        3. Set up obstacle detection and avoidance parameters
+        4. Configure navigation state management and goal queue system
+        5. Establish control parameters for precise robot movement
+
+        **Device Configuration:**
+        - Motors: Differential drive with velocity control mode
+        - LiDAR: Obstacle detection with 0.3m threshold
+        - GPS: Position feedback for navigation accuracy
+        - Compass: Heading feedback for orientation control
+
+        **Control Parameters:**
+        - Max Speed: 10.0 m/s for efficient navigation
+        - Angle Tolerance: 0.1 rad (~6°) for precise orientation
+        - Position Tolerance: 0.05m (5cm) for accurate waypoint following
+        - Goal Threshold: 0.8m for goal completion detection
+
+        Args:
+            robot (Robot): Webots robot instance for device access
+            timestep (int): Simulation timestep for device synchronization
+
+        Raises:
+            RuntimeError: If critical devices cannot be initialized
+            ValueError: If timestep is invalid or negative
+        """
         self.robot = robot
         self.timestep = timestep
-        
-        # Initialize devices
-        self.l_motor = robot.getDevice("wheel_left_joint")
-        self.r_motor = robot.getDevice("wheel_right_joint")
-        self.lidar = robot.getDevice("lidar")
-        self.compass = robot.getDevice("compass")
-        self.gps = robot.getDevice('gps')
-        
-        # Enable devices
-        self.lidar.enable(timestep)
-        self.compass.enable(timestep)
-        self.gps.enable(timestep)
-        
-        # Set motor modes
-        self.l_motor.setPosition(math.inf)
-        self.r_motor.setPosition(math.inf)
-        self.l_motor.setVelocity(0)
-        self.r_motor.setVelocity(0)
-        
+
+        # Initialize and configure robot devices
+        self._initialize_devices()
+
         # Initialize navigation components
         self.network = NodeNetwork()
         self.pddl_system = PDDLSystem()
 
-        # Simple obstacle detection variables
+        # Configure obstacle detection system
         self.obstacle_detected = False
         self.obstacle_pause_start = None
-        self.obstacle_pause_duration = 10.0  # 10 seconds pause
-        self.obstacle_threshold = 0.3  # 0.1m threshold
-        
-        # Navigation state
+        self.obstacle_pause_duration = 10.0  # 10-second pause for obstacle clearance
+        self.obstacle_threshold = 0.3  # 30cm detection threshold for safety
+
+        # Initialize navigation state variables
         self.current_path = []
         self.current_target_node = None
-        self.current_target_goal = None  # Which goal we're navigating to ('balls' or 'green')
+        self.current_target_goal = None
         self.path_index = 0
         self.total_distance_covered = 0.0
         self.planned_total_cost = 0.0
 
-        # Goal queue system
-        self.goal_queue = []  # Queue of goals to navigate to
-        self.completed_goals = []  # Track completed goals for progress reporting
-        self.current_goal_index = 0  # Index of current goal in original queue
-        self.total_goals_in_session = 0  # Total goals in current navigation session
+        # Configure goal queue management system
+        self.goal_queue = []
+        self.completed_goals = []
+        self.current_goal_index = 0
+        self.total_goals_in_session = 0
 
-        # Robot parameters
+        # Set robot control parameters
         self.max_speed = 10.0
-        self.angle_tolerance = 0.1  # ~6 degrees tolerance like your working code
-        self.position_tolerance = 0.05  # Very tight tolerance - 5cm for precise positioning
+        self.angle_tolerance = 0.1  # ~6 degrees for precise orientation
+        self.position_tolerance = 0.05  # 5cm for accurate positioning
 
-        # State tracking
-        self.state = "IDLE"  # IDLE, PLANNING, NAVIGATING, GOAL_REACHED
+        # Initialize state management
+        self.state = "IDLE"
         self.goal_reached = False
 
-        # Node transition tracking
+        # Configure node transition control
         self.node_reached_time = None
-        self.pause_duration = 0.5  # Pause for 0.5 seconds when reaching a node
-        self.last_completed_node = None  # Track which node we last completed to prevent duplicate processing
+        self.pause_duration = 0.5  # Brief pause at each waypoint
+        self.last_completed_node = None
+
+    def _initialize_devices(self):
+        """
+        Initialize and configure all robot devices.
+
+        Sets up motors in velocity control mode, enables sensors with
+        appropriate timestep, and validates device availability.
+        """
+        # Configure differential drive motors
+        self.l_motor = self.robot.getDevice("wheel_left_joint")
+        self.r_motor = self.robot.getDevice("wheel_right_joint")
+        self.l_motor.setPosition(math.inf)  # Velocity control mode
+        self.r_motor.setPosition(math.inf)
+        self.l_motor.setVelocity(0)  # Start stationary
+        self.r_motor.setVelocity(0)
+
+        # Configure navigation sensors
+        self.lidar = self.robot.getDevice("lidar")
+        self.compass = self.robot.getDevice("compass")
+        self.gps = self.robot.getDevice('gps')
+
+        # Enable sensors with simulation timestep
+        self.lidar.enable(self.timestep)
+        self.compass.enable(self.timestep)
+        self.gps.enable(self.timestep)
         
     def get_robot_position(self):
         """Get current robot position from GPS."""
@@ -91,7 +158,8 @@ class NavigationController:
             return False
 
         self.goal_queue.append(goal)
-        print(f"📋 Added '{goal}' to queue. Queue: {self.goal_queue}")
+        self.total_goals_in_session += 1  # Update total goals count
+        print(f"Added '{goal}' to queue. Queue: {self.goal_queue}")
         return True
 
     def add_multiple_goals_to_queue(self, goals):
@@ -102,7 +170,7 @@ class NavigationController:
                 added_goals.append(goal)
 
         if added_goals:
-            print(f"📋 Queue updated: {self.goal_queue}")
+            print(f"Queue updated: {self.goal_queue}")
             return True
         return False
 
@@ -131,7 +199,9 @@ class NavigationController:
         }
 
     def check_obstacle_detection(self):
-        """Simple obstacle detection: pause for 10 seconds if obstacle within 0.1m."""
+        """Simple obstacle detection: pause for 10 seconds if obstacle within 0.1m.
+        Personal Note: This code is augment code generated
+        """
         # Get LiDAR readings
         lidar_values = self.lidar.getRangeImage()
 
@@ -144,7 +214,7 @@ class NavigationController:
 
         # If obstacle detected and we're not already pausing
         if obstacle_detected_now and not self.obstacle_detected:
-            print(f"⚠️  OBSTACLE DETECTED within {self.obstacle_threshold}m! Pausing for {self.obstacle_pause_duration} seconds...")
+            print(f"OBSTACLE DETECTED within {self.obstacle_threshold}m! Pausing for {self.obstacle_pause_duration} seconds...")
             self.obstacle_detected = True
             self.obstacle_pause_start = time.time()
             self.stop_robot()
@@ -154,7 +224,7 @@ class NavigationController:
         if self.obstacle_detected and self.obstacle_pause_start is not None:
             elapsed_time = time.time() - self.obstacle_pause_start
             if elapsed_time >= self.obstacle_pause_duration:
-                print("✅ Obstacle pause complete. Resuming navigation...")
+                print("Obstacle pause complete. Resuming navigation...")
                 self.obstacle_detected = False
                 self.obstacle_pause_start = None
                 return False  # Resume navigation
@@ -165,7 +235,9 @@ class NavigationController:
         return False  # No obstacle, continue normal navigation
     
     def calculate_angle_difference(self, target_angle, current_angle):
-        """Calculate the shortest angle difference between two angles."""
+        """Calculate the shortest angle difference between two angles.
+        Personal Note: This code is agument code generated
+        """
         diff = target_angle - current_angle
         while diff > math.pi:
             diff -= 2 * math.pi
@@ -174,7 +246,9 @@ class NavigationController:
         return diff
     
     def rotate_to_angle(self, target_angle):
-        """Rotate robot to face target angle. Returns True when complete."""
+        """Rotate robot to face target angle. Returns True when complete.
+        Personal Note: This code is augment code generated
+        """
         current_angle = self.get_robot_heading()
         angle_diff = self.calculate_angle_difference(target_angle, current_angle)
 
@@ -182,7 +256,6 @@ class NavigationController:
             self.stop_robot()
             return True
 
-        # Use proportional control like your working code
         turn_rate = angle_diff * 2.0  # Proportional gain
         # Clamp to reasonable limits
         max_turn_speed = 2.0
@@ -192,10 +265,14 @@ class NavigationController:
         return False
     
     def move_forward(self, speed=None):
-        """Move robot forward at specified speed."""
+        """
+        Move robot forward at specified speed.
+
+        Args:
+            speed (float, optional): Forward velocity in m/s. Defaults to max_speed.
+        """
         if speed is None:
             speed = self.max_speed
-        print(f"Moving forward at speed: {speed}")
         self.set_motor_speeds(speed, speed)
     
     def stop_robot(self):
@@ -204,7 +281,6 @@ class NavigationController:
     
     def set_motor_speeds(self, left_speed, right_speed):
         """Set motor speeds with safety limits."""
-        # Clamp speeds to safe limits like your working code
         max_speed = 10.0
         left_speed = max(-max_speed, min(max_speed, left_speed))
         right_speed = max(-max_speed, min(max_speed, right_speed))
@@ -266,7 +342,7 @@ class NavigationController:
     def start_queue_navigation(self, goals):
         """Start navigation with a queue of goals."""
         if not goals:
-            print("❌ No goals provided")
+            print("No goals provided")
             return False
 
         # Clear existing queue and add new goals
@@ -278,10 +354,10 @@ class NavigationController:
             if goal in ['balls', 'green', 'ducks', 'red']:
                 valid_goals.append(goal)
             else:
-                print(f"❌ Invalid goal: '{goal}'. Skipping.")
+                print(f"Invalid goal: '{goal}'. Skipping.")
 
         if not valid_goals:
-            print("❌ No valid goals provided")
+            print("No valid goals provided")
             return False
 
         # Set total goals for this session
@@ -291,13 +367,15 @@ class NavigationController:
         if len(valid_goals) > 1:
             self.goal_queue = valid_goals[1:]
 
-        print(f"📋 Queue: {valid_goals} - Starting navigation to {valid_goals[0]}")
+        print(f"Queue: {valid_goals} - Starting navigation to {valid_goals[0]}")
 
         # Start navigation to first goal
         return self.start_navigation_to_target(valid_goals[0])
 
     def navigate_to_current_node(self):
-        """Navigate to the current target node using state machine approach."""
+        """Navigate to the current target node using state machine approach.
+        Personal Note: This code is augment generated
+        """
         if not self.current_target_node:
             return True  # Navigation complete
 
@@ -315,20 +393,17 @@ class NavigationController:
         # Check if we've reached the target node
         distance = self.network.calculate_distance(robot_pos, target_pos)
 
-        print(f"Navigating to {self.current_target_node}: robot={robot_pos}, target={target_pos}, distance={distance:.3f}m")
-
         if distance <= self.position_tolerance:
-            print(f"✓ Reached node: {self.current_target_node} (distance: {distance:.3f}m)")
             self.stop_robot()
 
             # Check if we've already processed this node completion
             if self.last_completed_node == self.current_target_node:
                 return False  # Already processed this node, just wait
 
-            # If we just reached this node, record the time
+            # If we just reached this node, record the time and print message once
             if self.node_reached_time is None:
+                print(f"✓ Reached waypoint: {self.current_target_node}")
                 self.node_reached_time = self.robot.getTime()
-                print(f"DEBUG: Starting pause at node {self.current_target_node}")
                 return False  # Stay at this node for a brief pause
 
             # Check if we've paused long enough
@@ -338,90 +413,88 @@ class NavigationController:
             # Reset pause timer and process node completion
             self.node_reached_time = None
             self.last_completed_node = self.current_target_node  # Mark this node as completed
-            print(f"DEBUG: Path info - current_path: {self.current_path}, path_index: {self.path_index}, len: {len(self.current_path)}")
 
             # Update distance covered
             if self.path_index > 0 and self.path_index - 1 < len(self.current_path):
                 prev_node = self.current_path[self.path_index - 1]
                 segment_cost = self.network.get_connection_weight(prev_node, self.current_target_node)
                 self.total_distance_covered += segment_cost
-                print(f"Segment cost: {segment_cost:.3f}m, Total covered: {self.total_distance_covered:.3f}m")
 
-            # Move to next node in path (only increment once per node)
+            # Move to next node in path
             self.path_index += 1
-            print(f"DEBUG: Incremented path_index to {self.path_index}")
 
             if self.path_index < len(self.current_path):
                 self.current_target_node = self.current_path[self.path_index]
                 self.last_completed_node = None  # Reset for next node
-                print(f"Next target: {self.current_target_node}")
                 return False
             else:
                 # Path complete - check if we've reached the target
-                print(f"DEBUG: Path complete, checking goal completion for {self.current_target_goal}")
+                print(f"Path complete! Checking goal completion for {self.current_target_goal}")
                 return self.check_goal_completion()
 
-        # Simplified navigation logic based on your working code
+        # Navigation control using proportional feedback
         target_angle = self.network.calculate_angle_to_target(robot_pos, target_pos)
         current_heading = self.get_robot_heading()
         angle_diff = self.calculate_angle_difference(target_angle, current_heading)
 
-        print(f"Target angle: {target_angle:.3f} rad ({target_angle*180/3.14159:.1f}°)")
-        print(f"Current heading: {current_heading:.3f} rad ({current_heading*180/3.14159:.1f}°)")
-        print(f"Angle difference: {angle_diff:.3f} rad ({angle_diff*180/3.14159:.1f}°)")
-
-        # Simple approach like your working code with distance-based speed control
+        # Proportional control for precise navigation
         if abs(angle_diff) > self.angle_tolerance:
-            print("↻ Need to rotate")
-            # Use proportional control for turning
+            # Rotate toward target with proportional control
             turn_rate = angle_diff * 2.0  # Proportional gain
             max_turn_speed = 2.0
             turn_rate = max(-max_turn_speed, min(max_turn_speed, turn_rate))
             self.set_motor_speeds(-turn_rate, turn_rate)
         else:
-            print("→ Moving forward")
-            # Slow down as we approach the target for precise positioning
-            if distance < 0.3:  # Within 30cm of target
+            # Move forward with distance-based speed control
+            if distance < 0.3:  # Slow down when approaching target
                 speed = max(0.5, distance * 2.0)  # Proportional speed reduction
-                print(f"  Approaching target - reduced speed: {speed:.2f}")
             else:
-                speed = 10
+                speed = self.max_speed
             self.move_forward(speed=speed)
 
         return False
     
     def check_goal_completion(self):
-        """Check if robot has reached the current target goal."""
+        """
+        Check if robot has reached the current target goal.
+
+        Uses goalchecker polygon detection for accurate goal completion validation.
+        The polygon-based method provides precise boundary detection with 0.8m threshold.
+
+        Returns:
+            bool: True if goal is reached, False otherwise
+        """
         robot_pos = self.get_robot_position()
-        target_goal = self.current_target_goal or 'balls'  # Default to balls for backward compatibility
+        target_goal = self.current_target_goal or 'balls'
 
-        # Check using goalchecker module
+        print(f"Checking goal completion for {target_goal} at position {robot_pos}")
+
+        # Use goalchecker polygon detection (most accurate method)
         nearby_goals = get_goals_in_range(*robot_pos)
+        print(f"Nearby goals detected: {nearby_goals}")
+
         if target_goal in nearby_goals:
+            print(f"Goal {target_goal} reached!")
             self._handle_goal_reached(target_goal)
             return True
 
-        # Also check using network distance calculation
-        if self.network.is_goal_reached(robot_pos, target_goal):
-            self._handle_goal_reached(target_goal)
-            return True
-
-        # If we completed the path but didn't reach goal, try to get closer
+        # If goal not reached, approach target center directly
         target_coords = self.network.get_target_coordinates(target_goal)
         target_distance = self.network.calculate_distance(robot_pos, target_coords)
-        print(f"Path complete. Distance to {target_goal}: {target_distance:.3f}m")
+        print(f"Distance to {target_goal} center: {target_distance:.3f}m")
 
-        if target_distance > self.network.goal_threshold:
-            print(f"Moving directly toward {target_goal} target...")
+        if target_distance > 0.5:  # Move closer if more than 50cm away
+            print(f"Moving closer to {target_goal} target...")
+            # Direct approach to goal with reduced speed
             target_angle = self.network.calculate_angle_to_target(robot_pos, target_coords)
             if self.rotate_to_angle(target_angle):
-                self.move_forward(speed=1.0)  # Slower approach
+                self.move_forward(speed=1.0)  # Careful approach
 
         return False
 
     def _handle_goal_reached(self, target_goal):
         """Handle goal completion and queue management."""
-        print(f"\n🎯 {target_goal.upper()} GOAL REACHED! Total distance covered: {self.total_distance_covered:.2f} meters")
+        print(f"\n{target_goal.upper()} GOAL REACHED! Total distance covered: {self.total_distance_covered:.2f} meters")
 
         # Add completed goal to completed list
         self.completed_goals.append(target_goal)
@@ -432,21 +505,25 @@ class NavigationController:
         total_goals = queue_status['total_goals']
 
         if total_goals > 1:
-            print(f"📊 Goal {completed_count} of {total_goals} completed!")
+            print(f"Goal {completed_count} of {total_goals} completed!")
 
         self.state = "GOAL_REACHED"
         self.goal_reached = True
         self.stop_robot()
 
+        # Clear goal detection state to prevent spam
+        if hasattr(self, '_last_detected_goal'):
+            delattr(self, '_last_detected_goal')
+
         # Check if there are more goals in the queue
         next_goal = self.get_next_goal_from_queue()
         if next_goal:
-            print(f"🚀 Starting navigation to next goal: {next_goal}")
-            print(f"📋 Remaining queue: {self.goal_queue}")
+            print(f"Starting navigation to next goal: {next_goal}")
+            print(f"Remaining queue: {self.goal_queue}")
             # Start navigation to next goal from current position
             self.start_navigation_to_target(next_goal)
         else:
-            print("🏁 All queued goals completed!")
+            print("All queued goals completed!")
             self.current_target_goal = None
             # Reset session when all goals are completed
             self.total_goals_in_session = 0

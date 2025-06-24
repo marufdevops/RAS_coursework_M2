@@ -1,16 +1,10 @@
 """
-Advanced PDDL Planning System for Multi-Goal Robot Navigation
-
 This module implements a sophisticated PDDL (Planning Domain Definition Language)
-integration system for optimal multi-goal robot navigation. The system combines
-classical AI planning techniques with modern robotics pathfinding to provide
-provably optimal solutions for complex navigation scenarios.
+integration system for optimal multi-goal robot navigation.
 
-**Theoretical Foundation:**
-- Classical Planning: STRIPS representation with typed objects
-- Search Algorithm: A* with Euclidean distance heuristic
+**Foundation:**
+- Classical Planning: STRIPS representation with typed objects and a*
 - Optimality Theory: Guaranteed shortest paths in weighted graphs
-- Computational Complexity: O(b^d) where b=branching factor, d=solution depth
 
 **PDDL Integration Architecture:**
 1. Domain Generation: Automated STRIPS domain creation with typing
@@ -20,25 +14,9 @@ provably optimal solutions for complex navigation scenarios.
 
 **Design Rationale:**
 - PDDL provides formal semantics for navigation planning
-- A* algorithm ensures optimal solutions with admissible heuristics
-- Automated generation reduces manual configuration errors
+- A* algorithm ensures optimal solutions
 - Modular architecture enables easy planner substitution
 
-**Performance Characteristics:**
-- Planning Time: ~0.15s average for 11-node network
-- Memory Usage: ~2MB for complete state space representation
-- Optimality: Guaranteed shortest paths through A* search
-- Scalability: Polynomial complexity in network size
-
-**Academic Integration:**
-Demonstrates advanced concepts from:
-- Artificial Intelligence: Automated planning and search algorithms
-- Robotics: Path planning and navigation systems
-- Computer Science: Graph algorithms and optimization
-- Mathematics: Discrete optimization and heuristic search
-
-Author: Advanced PDDL Navigation System
-Version: 2.0 - Multi-Goal Integration with Theoretical Validation
 """
 
 import subprocess
@@ -59,7 +37,33 @@ class PDDLSystem:
         self.network = NodeNetwork()
         
     def generate_domain_file(self, filename="navigation_domain.pddl"):
-        """Generate PDDL 1.2 domain file compatible with pyperplan."""
+        """
+        Generate PDDL 1.2 domain file compatible with pyperplan.
+
+        Creates a formal PDDL domain specification for robot navigation using
+        STRIPS representation with typed objects. The domain defines the
+        navigation action space and state predicates for optimal planning.
+
+        **PDDL Domain Structure:**
+        - Types: robot, node (for type safety and validation)
+        - Predicates: at(robot, node), connected(node, node)
+        - Actions: move(robot, from_node, to_node)
+
+        **Design Rationale:**
+        - STRIPS representation ensures compatibility with classical planners
+        - Typed objects prevent invalid action instantiations
+        - Simple action model enables efficient search algorithms
+        - Bidirectional connections modeled through symmetric predicates
+
+        Args:
+            filename (str, optional): Output filename for domain file
+
+        Returns:
+            str: Path to generated domain file
+
+        Raises:
+            IOError: If file cannot be written to specified location
+        """
         
         domain_content = """(define (domain navigation)
   (:requirements :strips :typing)
@@ -93,7 +97,39 @@ class PDDLSystem:
         return filename
     
     def generate_problem_file(self, robot_position, target='balls', filename="navigation_problem.pddl"):
-        """Generate PDDL problem file for navigation to specified target."""
+        """
+        Generate PDDL problem file for navigation to specified target.
+
+        Creates a problem instance for the navigation domain, specifying the
+        initial state (robot position) and goal state (target location).
+        Uses closest node mapping to translate continuous coordinates to
+        discrete node representation.
+
+        **Problem Structure:**
+        - Objects: robot instance and all network nodes
+        - Initial State: robot at closest node to current position
+        - Goal State: robot at closest node to target coordinates
+        - Facts: all bidirectional node connections
+
+        **Coordinate Mapping:**
+        Robot and target positions are mapped to closest network nodes using
+        Euclidean distance minimization, ensuring valid problem instances.
+
+        Args:
+            robot_position (tuple): Current robot coordinates (x, y)
+            target (str): Target goal name ('balls', 'green', 'ducks', 'red')
+            filename (str, optional): Output filename for problem file
+
+        Returns:
+            tuple: (problem_file, start_node, goal_node) where:
+                - problem_file (str): Path to generated problem file
+                - start_node (str): Starting node name
+                - goal_node (str): Goal node name
+
+        Raises:
+            ValueError: If target is not a valid goal name
+            IOError: If file cannot be written to specified location
+        """
 
         # Find closest node to robot and to target
         start_node, _ = self.network.find_closest_node(robot_position)
@@ -144,74 +180,22 @@ class PDDLSystem:
     def run_pyperplan(self, domain_file, problem_file):
         """Run pyperplan to generate optimal solution with A* algorithm."""
         try:
-            # Try different pyperplan command paths
-            pyperplan_commands = [
-                "pyperplan",
-                "/opt/anaconda3/bin/pyperplan",
-                "/usr/local/bin/pyperplan"
-            ]
+        
+            cmd = f"/opt/anaconda3/bin/pyperplan -s astar {domain_file} {problem_file}"
+            print(f"Trying command: {cmd}")
             
-            for cmd_base in pyperplan_commands:
-                cmd = f"{cmd_base} -s astar {domain_file} {problem_file}"
-                print(f"Trying command: {cmd}")
-                
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=os.getcwd())
-                
-                if result.returncode == 0:
-                    print(f"Pyperplan executed successfully with: {cmd_base}")
-                    solution_file = f"{problem_file}.soln"
-                    print(f"Solution file: {solution_file}")
-                    return solution_file
-                else:
-                    print(f"Command failed: {result.stderr}")
-                    continue
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=os.getcwd())
             
-            # If all commands failed, generate simple fallback solution
-            print("Pyperplan not available. Generating simple solution...")
-            return self._generate_simple_solution(problem_file)
-                
-        except Exception as e:
-            print(f"Error running pyperplan: {e}")
-            return self._generate_simple_solution(problem_file)
-    
-    def _generate_simple_solution(self, problem_file):
-        """Generate a simple direct solution when pyperplan is not available."""
-        try:
-            # Parse problem file to get start and goal
-            with open(problem_file, 'r') as f:
-                content = f.read()
-            
-            start_node = None
-            goal_node = None
-            
-            lines = content.split('\n')
-            for line in lines:
-                line = line.strip()
-                if line.startswith('(at tiago') and '(:init' in content.split('(:goal')[0]:
-                    parts = line.replace('(', '').replace(')', '').split()
-                    if len(parts) >= 3:
-                        start_node = parts[2]
-                elif line.startswith('(at tiago') and '(:goal' in content:
-                    parts = line.replace('(', '').replace(')', '').split()
-                    if len(parts) >= 3:
-                        goal_node = parts[2]
-            
-            if start_node and goal_node:
+            if result.returncode == 0:
+                print(f"Pyperplan executed successfully with: {cmd}")
                 solution_file = f"{problem_file}.soln"
-                with open(solution_file, 'w') as f:
-                    if start_node != goal_node:
-                        f.write(f"(move tiago {start_node} {goal_node})\n")
-                    else:
-                        f.write("; Already at goal\n")
-                
-                print(f"Simple solution generated: {solution_file}")
+                print(f"Solution file: {solution_file}")
                 return solution_file
             else:
-                print("Failed to parse problem file")
-                return None
-                
+                print(f"Command failed: {result.stderr}")
+
         except Exception as e:
-            print(f"Error generating simple solution: {e}")
+            print(f"Error running pyperplan: {e}")
             return None
     
     def parse_solution(self, solution_file):
@@ -286,14 +270,5 @@ class PDDLSystem:
             return [], 0.0
 
 
-if __name__ == "__main__":
-    # Test the PDDL system
-    pddl_system = PDDLSystem()
-    
-    # Test with robot at node1 position
-    robot_pos = (-1.96, -1.95)
-    path, cost = pddl_system.plan_navigation(robot_pos)
-    
-    print(f"\nNavigation Plan:")
-    print(f"Path: {path}")
-    print(f"Total Cost: {cost:.3f}m")
+# Production PDDL System - No test code needed
+# For testing, use the main navigation system in tiago_py.py
