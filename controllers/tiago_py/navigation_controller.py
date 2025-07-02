@@ -113,7 +113,7 @@ class NavigationController:
 
         # Configure node transition control
         self.node_reached_time = None
-        self.pause_duration = 0.5  # Brief pause at each waypoint
+        self.pause_duration = 0.2  # Brief pause at each waypoint
         self.last_completed_node = None
 
     def _initialize_devices(self):
@@ -152,22 +152,15 @@ class NavigationController:
         heading = math.atan2(compass_values[0], -compass_values[2])
         return heading
 
-    def add_goal_to_queue(self, goal):
-        """Add a goal to the navigation queue."""
-        if goal not in ['balls', 'green', 'ducks', 'red']:
-            return False
-
-        self.goal_queue.append(goal)
-        self.total_goals_in_session += 1  # Update total goals count
-        print(f"Added '{goal}' to queue. Queue: {self.goal_queue}")
-        return True
-
     def add_multiple_goals_to_queue(self, goals):
         """Add multiple goals to the navigation queue."""
         added_goals = []
         for goal in goals:
-            if self.add_goal_to_queue(goal):
-                added_goals.append(goal)
+            if goal not in ['balls', 'green', 'ducks', 'red']:
+                continue
+            self.goal_queue.append(goal)
+            self.total_goals_in_session += 1  # Update total goals count
+            print(f"Added '{goal}' to queue. Queue: {self.goal_queue}")
 
         if added_goals:
             print(f"Queue updated: {self.goal_queue}")
@@ -206,8 +199,7 @@ class NavigationController:
         lidar_values = self.lidar.getRangeImage()
 
         # Check front-facing sensors for obstacles
-        # Use middle third of LiDAR readings (front-facing)
-        front_readings = lidar_values[len(lidar_values)//3 : -len(lidar_values)//3]
+        front_readings = lidar_values[len(lidar_values)//4 : -len(lidar_values)//4]
 
         # Check if any reading is below threshold
         obstacle_detected_now = any(distance < self.obstacle_threshold for distance in front_readings)
@@ -280,7 +272,9 @@ class NavigationController:
         self.set_motor_speeds(0, 0)
     
     def set_motor_speeds(self, left_speed, right_speed):
-        """Set motor speeds with safety limits."""
+        """Set motor speeds with safety limits.
+        Personal Note: This code is augment generated
+        """
         max_speed = 10.0
         left_speed = max(-max_speed, min(max_speed, left_speed))
         right_speed = max(-max_speed, min(max_speed, right_speed))
@@ -402,7 +396,7 @@ class NavigationController:
 
             # If we just reached this node, record the time and print message once
             if self.node_reached_time is None:
-                print(f"✓ Reached waypoint: {self.current_target_node}")
+                print(f"Reached waypoint: {self.current_target_node}")
                 self.node_reached_time = self.robot.getTime()
                 return False  # Stay at this node for a brief pause
 
@@ -527,6 +521,8 @@ class NavigationController:
             self.current_target_goal = None
             # Reset session when all goals are completed
             self.total_goals_in_session = 0
+            self.state = "IDLE"
+            self.goal_reached = False
 
     def update(self):
         """Main update loop for navigation controller."""

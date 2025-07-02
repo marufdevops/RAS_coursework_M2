@@ -98,23 +98,12 @@ def process_user_commands(command, nav_controller):
         print(f"Invalid goals ignored: {invalid_goals}")
 
     if valid_goals:
-        if len(valid_goals) == 1:
-            # Single goal navigation
-            single_goal = valid_goals[0]
-            if nav_controller.state in ["IDLE", "GOAL_REACHED"]:
-                success = nav_controller.start_navigation_to_target(single_goal)
-                if not success:
-                    print(f"Failed to start navigation to {single_goal}")
-            else:
-                nav_controller.add_goal_to_queue(single_goal)
-        else:
-            # Multiple goal navigation
-            if nav_controller.state in ["IDLE", "GOAL_REACHED"]:
-                success = nav_controller.start_queue_navigation(valid_goals)
-                if not success:
-                    print(f"Failed to start queue navigation")
-            else:
-                nav_controller.add_multiple_goals_to_queue(valid_goals)
+        if nav_controller.state in ["IDLE", "GOAL_REACHED"]:
+            success = nav_controller.start_queue_navigation(valid_goals)
+            if not success:
+                print(f"Failed to start queue navigation")
+        else: 
+            nav_controller.add_multiple_goals_to_queue(valid_goals)
     else:
         print(f"No valid goals found. Supported: 'balls', 'green', 'ducks', 'red'")
 

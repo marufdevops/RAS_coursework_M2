@@ -268,7 +268,3 @@ class PDDLSystem:
         else:
             print("Failed to generate solution")
             return [], 0.0
-
-
-# Production PDDL System - No test code needed
-# For testing, use the main navigation system in tiago_py.py
